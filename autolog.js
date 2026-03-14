@@ -33,6 +33,8 @@ const state = {
   filterType: "all",
   historyQuery: "",
   form: {},
+  editingCarId: null,
+  editingLogId: null,
   toast: null,
 };
 
@@ -497,7 +499,8 @@ function addCar() {
   const f = state.form;
   if (!f.name || !f.year || !f.plate) return setToast("Completa nombre, año y tablilla.", "error");
 
-  const existingIndex = state.data.cars.findIndex(c => String(c.id) === String(f.id));
+  const targetId = state.editingCarId ?? f.id;
+  const existingIndex = state.data.cars.findIndex(c => String(c.id) === String(targetId));
   const isEditing = existingIndex >= 0;
   const car = {
     id: isEditing ? state.data.cars[existingIndex].id : uid(),
@@ -517,6 +520,7 @@ function addCar() {
 
   updateData({ ...state.data, cars });
   state.form = {};
+  state.editingCarId = null;
   state.view = "dashboard";
   state.selectedCar = car.id;
   setToast(isEditing ? "Vehículo actualizado." : "Vehículo añadido.", "success");
@@ -524,6 +528,7 @@ function addCar() {
 function editCar(id) {
   const car = getCarById(id);
   if (!car) return;
+  state.editingCarId = car.id;
   state.form = { ...car, editing: true };
   state.view = "addCar";
   render();
@@ -532,7 +537,8 @@ function addLog() {
   const f = state.form;
   if (!f.carId || !f.type || !f.date || f.km === undefined || f.km === "") return setToast("Completa vehículo, tipo, fecha y kilometraje.", "error");
 
-  const existingIndex = state.data.logs.findIndex(l => String(l.id) === String(f.id));
+  const targetId = state.editingLogId ?? f.id;
+  const existingIndex = state.data.logs.findIndex(l => String(l.id) === String(targetId));
   const isEditing = existingIndex >= 0;
   const log = {
     id: isEditing ? state.data.logs[existingIndex].id : uid(),
@@ -555,12 +561,14 @@ function addLog() {
 
   updateData({ ...state.data, cars, logs });
   state.form = {};
+  state.editingLogId = null;
   state.view = "history";
   setToast(isEditing ? "Mantenimiento actualizado." : "Mantenimiento registrado.", "success");
 }
 function editLog(id) {
   const log = state.data.logs.find(l => String(l.id) === String(id));
   if (!log) return;
+  state.editingLogId = log.id;
   state.form = { ...log, editing: true };
   state.view = "addLog";
   render();
@@ -572,10 +580,12 @@ function deleteCar(id) {
     logs: state.data.logs.filter(l => String(l.carId) !== String(id))
   });
   if (String(state.selectedCar) === String(id)) state.selectedCar = null;
+  if (String(state.editingCarId) === String(id)) { state.editingCarId = null; state.form = {}; }
   setToast("Vehículo eliminado.", "warn");
 }
 function deleteLog(id) {
   updateData({ ...state.data, logs: state.data.logs.filter(l => l.id !== id) });
+  if (String(state.editingLogId) === String(id)) { state.editingLogId = null; state.form = {}; }
   setToast("Registro eliminado.", "warn");
 }
 function exportBackup() {
@@ -1061,8 +1071,8 @@ function bindEvents() {
   $("#import-input")?.addEventListener("change", e => importBackup(e.target.files?.[0]));
   document.querySelectorAll("[data-view]").forEach(el => el.addEventListener("click", () => {
     const nextView = el.getAttribute("data-view");
-    if (nextView === "addCar") state.form = {};
-    if (nextView === "addLog") state.form = { carId: String(selectedDashboardCar()?.id || "") };
+    if (nextView === "addCar") { state.form = {}; state.editingCarId = null; }
+    if (nextView === "addLog") { state.form = { carId: String(selectedDashboardCar()?.id || "") }; state.editingLogId = null; }
     state.view = nextView;
     render();
   }));
@@ -1072,6 +1082,7 @@ function bindEvents() {
   }));
   $("#quick-log-btn")?.addEventListener("click", () => {
     const car = selectedDashboardCar();
+    state.editingLogId = null;
     state.form = { carId: String(car?.id || "") };
     state.view = "addLog";
     render();
@@ -1097,6 +1108,7 @@ function bindEvents() {
     addCar();
   });
   $("#cancel-car-btn")?.addEventListener("click", () => {
+    state.editingCarId = null;
     state.form = {};
     state.view = "dashboard";
     render();
@@ -1116,6 +1128,7 @@ function bindEvents() {
     addLog();
   });
   $("#cancel-log-btn")?.addEventListener("click", () => {
+    state.editingLogId = null;
     state.form = {};
     state.view = "history";
     render();
