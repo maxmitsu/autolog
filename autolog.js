@@ -13,12 +13,6 @@ const TYPES = [
   { id:"battery", label:"Batería", icon:"🔋", interval:50000, color:"#F97316" },
   { id:"alignment", label:"Alineación", icon:"📐", interval:15000, color:"#EC4899" },
   { id:"ac", label:"Sistema A/C", icon:"❄️", interval:25000, color:"#06B6D4" },
-  { id:"fuel", label:"Gasolina", icon:"⛽", interval:null, color:"#22C55E" },
-  { id:"cabin_filter", label:"Filtro de Cabina", icon:"🌬️", interval:15000, color:"#38BDF8" },
-  { id:"air_filter", label:"Filtro de Aire", icon:"🫧", interval:12000, color:"#60A5FA" },
-  { id:"spark_plugs", label:"Bujías", icon:"✨", interval:60000, color:"#FBBF24" },
-  { id:"wipers", label:"Limpiaparabrisas", icon:"🌧️", interval:12000, color:"#93C5FD" },
-  { id:"inspection", label:"Inspección General", icon:"🔍", interval:10000, color:"#A78BFA" },
   { id:"other", label:"Otro", icon:"📝", interval:null, color:"#78716C" }
 ];
 
@@ -100,10 +94,7 @@ function normalizeData(input) {
       km: Number.isFinite(Number(l.km ?? l.odo ?? l.mi)) ? Math.max(0, parseInt(l.km ?? l.odo ?? l.mi, 10)) : 0,
       cost: typeof l.cost === "string" ? l.cost.slice(0, 30) : "",
       shop: typeof l.shop === "string" ? l.shop.slice(0, 80) : "",
-      notes: typeof l.notes === "string" ? l.notes.slice(0, 500) : "",
-      gallons: Number.isFinite(Number(l.gallons)) ? Math.max(0, Number(l.gallons)) : 0,
-      pricePerGallon: Number.isFinite(Number(l.pricePerGallon)) ? Math.max(0, Number(l.pricePerGallon)) : 0,
-      fullTank: l.fullTank !== false
+      notes: typeof l.notes === "string" ? l.notes.slice(0, 500) : ""
     }))
     .filter(l => carIds.has(l.carId) && l.type && l.date);
   return { cars: safeCars, logs: safeLogs };
@@ -194,70 +185,6 @@ function getCarById(id) {
 }
 function getTypeById(id) {
   return TYPES.find(t => t.id === id);
-}
-function parseMoney(value) {
-  const n = parseFloat(String(value || "").replace(/[^0-9.]/g, ""));
-  return Number.isFinite(n) ? n : 0;
-}
-function getFuelLogs(carId) {
-  return state.data.logs
-    .filter(l => l.type === "fuel" && String(l.carId) === String(carId))
-    .sort((a,b) => new Date(a.date) - new Date(b.date));
-}
-function calculateFuelStats(carId) {
-  const fuelLogs = getFuelLogs(carId);
-  if (fuelLogs.length < 2) return null;
-  let totalGallons = 0;
-  let totalCost = 0;
-  let totalMiles = 0;
-  for (let i = 1; i < fuelLogs.length; i++) {
-    const prev = fuelLogs[i - 1];
-    const curr = fuelLogs[i];
-    if (!curr.gallons || !curr.fullTank) continue;
-    const miles = Math.max(0, Number(curr.km) - Number(prev.km));
-    if (!miles) continue;
-    totalMiles += miles;
-    totalGallons += Number(curr.gallons) || 0;
-    totalCost += parseMoney(curr.cost) || ((Number(curr.gallons) || 0) * (Number(curr.pricePerGallon) || 0));
-  }
-  if (!totalGallons || !totalMiles) return null;
-  return {
-    mpg: totalMiles / totalGallons,
-    costPerMile: totalCost / totalMiles,
-    totalFuelCost: totalCost
-  };
-}
-function getFuelMonthlyStats(carId) {
-  const fuelLogs = getFuelLogs(carId);
-  const now = new Date();
-  const month = now.getMonth();
-  const year = now.getFullYear();
-  const monthly = fuelLogs.filter(log => {
-    const d = new Date((log.date || "") + "T00:00:00");
-    return !Number.isNaN(d.getTime()) && d.getMonth() === month && d.getFullYear() === year;
-  });
-  return {
-    gallons: monthly.reduce((s,l) => s + (Number(l.gallons) || 0), 0),
-    cost: monthly.reduce((s,l) => s + (parseMoney(l.cost) || ((Number(l.gallons)||0)*(Number(l.pricePerGallon)||0))), 0),
-    count: monthly.length
-  };
-}
-function getLatestFuelLog(carId) {
-  const logs = getFuelLogs(carId);
-  return logs.length ? logs[logs.length - 1] : null;
-}
-function getFuelChartData(carId) {
-  const fuelLogs = getFuelLogs(carId).filter(l => l.gallons && l.fullTank);
-  const points = [];
-  for (let i = 1; i < fuelLogs.length; i++) {
-    const prev = fuelLogs[i - 1];
-    const curr = fuelLogs[i];
-    const miles = Math.max(0, Number(curr.km) - Number(prev.km));
-    const gallons = Number(curr.gallons) || 0;
-    if (!miles || !gallons) continue;
-    points.push({ date: curr.date, mpg: miles / gallons });
-  }
-  return points.slice(-8);
 }
 function getLastLog(carId, typeId) {
   return state.data.logs
@@ -722,7 +649,6 @@ function renderHeader() {
           ${navBtn("dashboard","Inicio")}
           ${navBtn("addCar","Nuevo")}
           ${navBtn("addLog","Registrar")}
-          ${navBtn("fuel","Gasolina")}
           ${navBtn("history","Historial")}
         </div>
         <div class="muted small" style="margin-left:auto">${state.data.cars.length} veh.</div>
@@ -853,131 +779,6 @@ function renderDateUpcomingPanel(car) {
     </div>
   `;
 }
-
-function renderFuelDashboardPanel(car) {
-  const stats = calculateFuelStats(car.id);
-  const monthly = getFuelMonthlyStats(car.id);
-  const latest = getLatestFuelLog(car.id);
-  if (!stats && !monthly.count && !latest) return "";
-  return `
-    <div class="card fuel-panel">
-      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:12px">
-        <div style="font-weight:700">⛽ Combustible</div>
-        <div class="small muted">${monthly.count ? `${monthly.count} registros este mes` : "Sin recargas este mes"}</div>
-      </div>
-      <div class="fuel-grid">
-        <div class="fuel-box">
-          <div class="stat-label">Gasto mensual</div>
-          <div class="stat-value">$${numFmt(monthly.cost, "en-US")}</div>
-        </div>
-        <div class="fuel-box">
-          <div class="stat-label">Galones este mes</div>
-          <div class="stat-value">${numFmt(monthly.gallons, "en-US")}</div>
-        </div>
-        <div class="fuel-box">
-          <div class="stat-label">MPG promedio</div>
-          <div class="stat-value">${stats ? stats.mpg.toFixed(1) : "-"}</div>
-        </div>
-        <div class="fuel-box">
-          <div class="stat-label">Costo por milla</div>
-          <div class="stat-value">${stats ? `$${stats.costPerMile.toFixed(2)}` : "-"}</div>
-        </div>
-      </div>
-      ${latest ? `<div class="fuel-latest small muted">Última recarga: ${fmtDate(latest.date)} · ${numFmt(latest.gallons || 0, "en-US")} gal · $${numFmt(latest.pricePerGallon || 0, "en-US")}/gal</div>` : ``}
-    </div>
-  `;
-}
-
-function saveFuelEntry() {
-  const carId = state.selectedCar || state.data.cars[0]?.id;
-  if (!carId) return setToast("Primero añade un vehículo.", "error");
-  const date = $("#fuel-date")?.value || "";
-  const km = $("#fuel-km")?.value || "";
-  const gallons = $("#fuel-gallons")?.value || "";
-  const pricePerGallon = $("#fuel-price")?.value || "";
-  const cost = $("#fuel-cost")?.value || "";
-  const notes = $("#fuel-notes")?.value || "";
-  const fullTank = ($("#fuel-fullTank")?.value || "yes") === "yes";
-  if (!date || !km || !gallons) return setToast("Completa fecha, millas y galones.", "error");
-
-  const log = {
-    id: uid(),
-    carId: String(carId),
-    type: "fuel",
-    date: String(date),
-    km: Math.max(0, parseInt(km, 10)),
-    cost: String(cost || "").trim(),
-    shop: "",
-    notes: String(notes || "").trim(),
-    gallons: Number.isFinite(Number(gallons)) ? Number(gallons) : 0,
-    pricePerGallon: Number.isFinite(Number(pricePerGallon)) ? Number(pricePerGallon) : 0,
-    fullTank
-  };
-  if (!log.cost && log.gallons && log.pricePerGallon) {
-    log.cost = `$${(log.gallons * log.pricePerGallon).toFixed(2)}`;
-  }
-  const cars = state.data.cars.map(c => String(c.id) === String(carId) ? { ...c, km: Math.max(Number(c.km) || 0, Number(log.km) || 0) } : c);
-  updateData({ cars, logs: [log, ...state.data.logs] });
-  state.view = "fuel";
-  render();
-  setToast("Recarga registrada.", "success");
-}
-
-function renderFuelView() {
-  if (!state.data.cars.length) {
-    return `<div class="card empty"><p>Primero debes añadir un vehículo.</p><div style="margin-top:16px"><button class="btn btn-primary" data-view="addCar">Añadir vehículo</button></div></div>`;
-  }
-  const car = selectedDashboardCar();
-  const fuelLogs = state.data.logs.filter(l => l.type === "fuel" && String(l.carId) === String(car?.id)).sort((a,b)=>new Date(b.date)-new Date(a.date));
-  const chartData = getFuelChartData(car?.id);
-  const maxMpg = Math.max(...chartData.map(p => p.mpg), 1);
-
-  return `
-    <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:18px">
-      <h2 style="margin:0">Gasolina</h2>
-      <div class="row">
-        ${state.data.cars.map(c => `<button class="btn ${String(car?.id) === String(c.id) ? "btn-primary" : ""}" data-select-car="${c.id}">${esc(c.name)} ${esc(c.year)}</button>`).join("")}
-      </div>
-    </div>
-
-    <div class="card fuel-entry-card">
-      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:14px">
-        <strong>Registrar recarga</strong>
-        <span class="small muted">${esc(car?.name || "")}</span>
-      </div>
-      <div class="grid-3">
-        ${field("Fecha *", `<input class="input" id="fuel-date" type="date">`)}
-        ${field("Millas *", `<input class="input" id="fuel-km" type="number" value="${esc(car?.km || "")}">`)}
-        ${field("Galones *", `<input class="input" id="fuel-gallons" type="number" step="0.01">`)}
-      </div>
-      <div class="grid-3">
-        ${field("Precio por galón", `<input class="input" id="fuel-price" type="number" step="0.01">`)}
-        ${field("Costo total", `<input class="input" id="fuel-cost">`)}
-        ${field("Tanque lleno", `<select class="select" id="fuel-fullTank"><option value="yes">Sí</option><option value="no">No</option></select>`)}
-      </div>
-      ${field("Notas", `<textarea class="textarea" id="fuel-notes"></textarea>`)}
-      <div style="margin-top:16px"><button id="save-fuel-btn" class="btn btn-primary">Guardar recarga</button></div>
-    </div>
-
-    <div class="card fuel-chart-card">
-      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:12px">
-        <strong>MPG reciente</strong>
-        <span class="small muted">${chartData.length ? "Últimas recargas llenas" : "Aún no hay suficientes datos"}</span>
-      </div>
-      ${chartData.length ? `<div class="fuel-chart">${chartData.map(point => `<div class="fuel-bar-wrap"><div class="fuel-bar" style="height:${Math.max(16, (point.mpg / maxMpg) * 140)}px"></div><div class="fuel-bar-label">${point.mpg.toFixed(1)}</div><div class="fuel-bar-date">${esc(fmtDate(point.date))}</div></div>`).join("")}</div>` : `<div class="small muted">Registra al menos dos recargas con tanque lleno para ver el gráfico.</div>`}
-    </div>
-
-    ${renderFuelDashboardPanel(car)}
-
-    <div class="row" style="justify-content:space-between;align-items:center;margin:20px 0 12px">
-      <strong>Historial de combustible</strong>
-      <span class="small muted">${numFmt(fuelLogs.length, "en-US")} registros</span>
-    </div>
-
-    ${fuelLogs.length ? `<div class="table">${fuelLogs.map(log => `<div class="card entry"><div style="flex:1;min-width:220px"><div class="row" style="justify-content:space-between;align-items:center"><strong>${fmtDate(log.date)}</strong><span class="small muted">${numFmt(log.km, "en-US")} mi</span></div><div class="small muted" style="margin-top:8px">⛽ ${numFmt(log.gallons || 0, "en-US")} gal · $${numFmt(log.pricePerGallon || 0, "en-US")}/gal ${log.fullTank ? "· tanque lleno" : ""}</div>${log.cost ? `<div class="small muted" style="margin-top:6px">Total: ${esc(log.cost)}</div>` : ""}${log.notes ? `<div class="small muted" style="margin-top:6px">📝 ${esc(log.notes)}</div>` : ""}</div><div class="row"><button class="btn btn-danger" data-delete-log="${log.id}">Eliminar</button></div></div>`).join("")}</div>` : `<div class="card empty">No hay recargas registradas todavía.</div>`}
-  `;
-}
-
 function renderDashboard() {
   if (!state.data.cars.length) {
     return `
@@ -1003,7 +804,6 @@ function renderDashboard() {
     ${car ? renderUpcomingPanel(car) : ""}
     ${car ? renderDateUpcomingPanel(car) : ""}
     ${car ? renderCostPanel(car) : ""}
-    ${car ? renderFuelDashboardPanel(car) : ""}
     ${car ? renderReminderPanel(car) : ""}
     ${car ? `
       <div class="card" style="padding:22px;margin-bottom:20px">
@@ -1135,7 +935,6 @@ function renderHistory() {
                     ${log.shop ? ` · 🔧 ${esc(log.shop)}` : ""}
                     ${log.cost ? ` · 💲 ${esc(log.cost)}` : ""}
                   </div>
-                  ${log.type === "fuel" ? `<div class="small muted" style="margin-top:6px">⛽ ${numFmt(log.gallons || 0, "en-US")} gal · $${numFmt(log.pricePerGallon || 0, "en-US")}/gal ${log.fullTank ? "· tanque lleno" : ""}</div>` : ""}
                   ${log.notes ? `<div class="small muted" style="margin-top:6px">📝 ${esc(log.notes)}</div>` : ""}
                 </div>
               </div>
@@ -1160,7 +959,6 @@ function renderApp() {
   if (state.view === "dashboard") body = renderDashboard();
   if (state.view === "addCar") body = renderAddCar();
   if (state.view === "addLog") body = renderAddLog();
-  if (state.view === "fuel") body = renderFuelView();
   if (state.view === "history") body = renderHistory();
   if (state.view === "backups") body = renderBackupsView();
   return `${renderHeader()}<div class="wrap">${body}</div>`;
@@ -1204,17 +1002,6 @@ function bindEvents() {
   document.querySelectorAll("[data-restore-backup]").forEach(el => el.addEventListener("click", () => {
     restoreBackupByIndex(Number(el.getAttribute("data-restore-backup")));
   }));
-  $("#save-fuel-btn")?.addEventListener("click", saveFuelEntry);
-  $("#fuel-gallons")?.addEventListener("input", () => {
-    const gallons = Number($("#fuel-gallons")?.value || 0);
-    const price = Number($("#fuel-price")?.value || 0);
-    if (gallons && price) $("#fuel-cost").value = `$${(gallons * price).toFixed(2)}`;
-  });
-  $("#fuel-price")?.addEventListener("input", () => {
-    const gallons = Number($("#fuel-gallons")?.value || 0);
-    const price = Number($("#fuel-price")?.value || 0);
-    if (gallons && price) $("#fuel-cost").value = `$${(gallons * price).toFixed(2)}`;
-  });
   $("#export-btn")?.addEventListener("click", exportBackup);
   $("#import-input")?.addEventListener("change", e => importBackup(e.target.files?.[0]));
   document.querySelectorAll("[data-view]").forEach(el => el.addEventListener("click", () => {
