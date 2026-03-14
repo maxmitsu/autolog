@@ -34,8 +34,7 @@ a { color: inherit; }
 .syncdot { width: 8px; height: 8px; border-radius: 50%; background: #666; }
 .header { position: sticky; top: 0; z-index: 20; background: rgba(13,13,15,.95); backdrop-filter: blur(10px); border-bottom: 1px solid #1e1e22; }
 .header-inner { max-width: 1040px; margin: 0 auto; min-height: 58px; display: flex; align-items: center; gap: 16px; padding: 0 20px; }
-.logo { width: 34px; height: 34px; border-radius: 10px; background: #111; border: 1px solid var(--border); display: grid; place-items: center; overflow: hidden; flex: 0 0 auto; }
-.logo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.logo { width: 30px; height: 30px; border-radius: 8px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); display: grid; place-items: center; color: #111; font-weight: 900; }
 .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
 .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; }
 .services { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); gap: 12px; }
@@ -115,3 +114,8 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 0; }
 .btn-install:hover {
   background: #221b0e;
 }
+
+
+.fuel-chart { display:flex; align-items:flex-end; gap:12px; min-height:180px; padding-top:10px; }
+.fuel-bar-wrap { flex:1; min-width:0; text-align:center; }
+.fuel-bar { width:100%; border-radius:10px 10px 4px 4px; background: linear-gradient(180deg, var(--accent), var(--accent-2)); min-height:10px; margin-bottom:8px; }
