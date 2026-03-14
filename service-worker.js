@@ -1,9 +1,10 @@
-const CACHE_NAME = "autolog-pwa-v2";
+const CACHE_NAME = "autolog-pwa-v3";
+
 const APP_SHELL = [
   "./",
   "./index.html",
-  "./autolog.css?v=5",
-  "./autolog.js?v=5",
+  "./autolog.css?v=13",
+  "./autolog.js?v=13",
   "./manifest.json",
   "./icon-192-custom.png",
   "./icon-512-custom.png"
