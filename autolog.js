@@ -745,7 +745,7 @@ function renderHeader() {
     </div>
     <div class="header">
       <div class="header-inner">
-        <div class="row" style="margin-right:8px">
+        <div class="row" style="margin-right:8px;flex-wrap:nowrap">
           <div class="logo"><img src="./icon-512-custom.png" alt="AutoLog"></div>
           <strong>AutoLog Secure</strong>
         </div>
