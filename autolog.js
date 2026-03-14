@@ -493,15 +493,33 @@ async function installPWA() {
   }
 }
 
-function startAddCar() {
+function addCar() {
+  const f = state.form;
+  if (!f.name || !f.year || !f.plate) return setToast("Completa nombre, año y tablilla.", "error");
+
+  const existingIndex = state.data.cars.findIndex(c => String(c.id) === String(f.id));
+  const isEditing = existingIndex >= 0;
+  const car = {
+    id: isEditing ? state.data.cars[existingIndex].id : uid(),
+    name: String(f.name).trim(),
+    year: String(f.year).trim(),
+    plate: String(f.plate).trim().toUpperCase(),
+    km: Number.isFinite(Number(f.km)) ? Math.max(0, parseInt(f.km, 10)) : 0,
+    color: String(f.color || "").trim()
+  };
+
+  const cars = [...state.data.cars];
+  if (isEditing) {
+    cars[existingIndex] = { ...cars[existingIndex], ...car };
+  } else {
+    cars.push(car);
+  }
+
+  updateData({ ...state.data, cars });
   state.form = {};
-  state.view = "addCar";
-  render();
-}
-function startAddLog(prefill = {}) {
-  state.form = { ...prefill };
-  state.view = "addLog";
-  render();
+  state.view = "dashboard";
+  state.selectedCar = car.id;
+  setToast(isEditing ? "Vehículo actualizado." : "Vehículo añadido.", "success");
 }
 function editCar(id) {
   const car = getCarById(id);
@@ -510,39 +528,14 @@ function editCar(id) {
   state.view = "addCar";
   render();
 }
-function editLog(id) {
-  const log = state.data.logs.find(l => String(l.id) === String(id));
-  if (!log) return;
-  state.form = { ...log, editing: true };
-  state.view = "addLog";
-  render();
-}
-
-function addCar() {
-  const f = state.form;
-  if (!f.name || !f.year || !f.plate) return setToast("Completa nombre, año y tablilla.", "error");
-  const car = {
-    id: f.editing ? Number(f.id) : uid(),
-    name: String(f.name).trim(),
-    year: String(f.year).trim(),
-    plate: String(f.plate).trim().toUpperCase(),
-    km: Number.isFinite(Number(f.km)) ? Math.max(0, parseInt(f.km, 10)) : 0,
-    color: String(f.color || "").trim()
-  };
-  const cars = f.editing
-    ? state.data.cars.map(c => String(c.id) === String(car.id) ? { ...c, ...car } : c)
-    : [...state.data.cars, car];
-  updateData({ ...state.data, cars });
-  state.form = {};
-  state.view = "dashboard";
-  state.selectedCar = car.id;
-  setToast(f.editing ? "Vehículo actualizado." : "Vehículo añadido.", "success");
-}
 function addLog() {
   const f = state.form;
   if (!f.carId || !f.type || !f.date || f.km === undefined || f.km === "") return setToast("Completa vehículo, tipo, fecha y kilometraje.", "error");
+
+  const existingIndex = state.data.logs.findIndex(l => String(l.id) === String(f.id));
+  const isEditing = existingIndex >= 0;
   const log = {
-    id: f.editing ? Number(f.id) : uid(),
+    id: isEditing ? state.data.logs[existingIndex].id : uid(),
     carId: String(f.carId),
     type: String(f.type),
     date: String(f.date),
@@ -551,14 +544,26 @@ function addLog() {
     shop: String(f.shop || "").trim(),
     notes: String(f.notes || "").trim()
   };
-  const cars = state.data.cars.map(c => String(c.id) === String(f.carId) ? { ...c, km: Math.max(Number(c.km) || 0, Number(log.km) || 0) } : c);
-  const logs = f.editing
-    ? state.data.logs.map(l => String(l.id) === String(log.id) ? { ...l, ...log } : l).sort((a,b) => new Date(b.date) - new Date(a.date))
-    : [log, ...state.data.logs];
-  updateData({ cars, logs });
+
+  const cars = state.data.cars.map(c => String(c.id) === String(log.carId) ? { ...c, km: Math.max(Number(c.km) || 0, Number(log.km) || 0) } : c);
+  const logs = [...state.data.logs];
+  if (isEditing) {
+    logs[existingIndex] = { ...logs[existingIndex], ...log };
+  } else {
+    logs.unshift(log);
+  }
+
+  updateData({ ...state.data, cars, logs });
   state.form = {};
   state.view = "history";
-  setToast(f.editing ? "Registro actualizado." : "Mantenimiento registrado.", "success");
+  setToast(isEditing ? "Mantenimiento actualizado." : "Mantenimiento registrado.", "success");
+}
+function editLog(id) {
+  const log = state.data.logs.find(l => String(l.id) === String(id));
+  if (!log) return;
+  state.form = { ...log, editing: true };
+  state.view = "addLog";
+  render();
 }
 function deleteCar(id) {
   if (!confirm("¿Eliminar este vehículo y todos sus registros?")) return;
@@ -674,7 +679,7 @@ function renderHeader() {
     <div class="header">
       <div class="header-inner">
         <div class="row" style="margin-right:8px">
-          <div class="logo">🚗</div>
+          <div class="logo"><img src="./icon-192-custom.png" alt="AutoLog" /></div>
           <strong>AutoLog Secure</strong>
         </div>
         <div class="nav">
@@ -811,63 +816,6 @@ function renderDateUpcomingPanel(car) {
     </div>
   `;
 }
-function renderSmartAlerts(car) {
-  const mileageUpcoming = getUpcomingServices(car).slice(0, 2).map(item => ({
-    kind: "mileage",
-    severity: item.remaining <= Math.max(500, Math.round(item.type.interval * 0.1)) ? "warn" : "ok",
-    title: item.type.label,
-    detail: `Faltan ${numFmt(item.remaining, "es-ES")} mi`
-  }));
-  const dateUpcoming = getDateBasedUpcomingServices(car).slice(0, 2).map(item => ({
-    kind: "date",
-    severity: item.diffDays < 0 ? "danger" : item.diffDays <= 30 ? "warn" : "ok",
-    title: item.label,
-    detail: item.diffDays < 0 ? `Vencido hace ${Math.abs(item.diffDays)} días` : `En ${item.diffDays} días`
-  }));
-  const items = [...mileageUpcoming, ...dateUpcoming]
-    .filter(item => item.severity !== "ok")
-    .slice(0, 4);
-  if (!items.length) return "";
-  return `
-    <div class="card" style="padding:18px;margin-bottom:20px">
-      <div style="font-weight:700;margin-bottom:10px">🔔 Alertas inteligentes</div>
-      <div class="col" style="gap:10px">
-        ${items.map(item => `
-          <div class="smart-alert ${item.severity === "danger" ? "danger" : "warn"}">
-            <strong>${esc(item.title)}</strong>
-            <div class="small muted">${esc(item.detail)}</div>
-          </div>`).join("")}
-      </div>
-    </div>
-  `;
-}
-function renderCostChart(car) {
-  const monthly = new Map();
-  state.data.logs
-    .filter(l => String(l.carId) === String(car.id) && l.date)
-    .forEach(l => {
-      const key = String(l.date).slice(0, 7);
-      monthly.set(key, (monthly.get(key) || 0) + parseMoney(l.cost));
-    });
-  const rows = [...monthly.entries()].sort((a,b) => a[0].localeCompare(b[0])).slice(-6);
-  if (!rows.length || rows.every(([,value]) => value <= 0)) return "";
-  const max = Math.max(...rows.map(([,value]) => value), 1);
-  return `
-    <div class="card" style="padding:18px;margin-bottom:20px">
-      <div style="font-weight:700;margin-bottom:12px">📊 Gastos por mes</div>
-      <div class="chart-list">
-        ${rows.map(([month, value]) => `
-          <div class="chart-row">
-            <div class="small muted chart-label">${esc(month)}</div>
-            <div class="chart-bar"><span style="width:${Math.max(8, (value / max) * 100)}%"></span></div>
-            <div class="small">$${value.toFixed(2)}</div>
-          </div>
-        `).join("")}
-      </div>
-    </div>
-  `;
-}
-
 function renderDashboard() {
   if (!state.data.cars.length) {
     return `
@@ -875,7 +823,7 @@ function renderDashboard() {
         <div style="font-size:54px">🚗</div>
         <h2>Sin vehículos registrados</h2>
         <p>Añade tu primer vehículo para comenzar.</p>
-        <div style="margin-top:18px"><button class="btn btn-primary" id="empty-add-car-btn">Añadir vehículo</button></div>
+        <div style="margin-top:18px"><button class="btn btn-primary" data-view="addCar">Añadir vehículo</button></div>
       </div>
     `;
   }
@@ -893,9 +841,7 @@ function renderDashboard() {
     ${car ? renderUpcomingPanel(car) : ""}
     ${car ? renderDateUpcomingPanel(car) : ""}
     ${car ? renderCostPanel(car) : ""}
-    ${car ? renderCostChart(car) : ""}
     ${car ? renderReminderPanel(car) : ""}
-    ${car ? renderSmartAlerts(car) : ""}
     ${car ? `
       <div class="card" style="padding:22px;margin-bottom:20px">
         <div class="row" style="justify-content:space-between;align-items:flex-start">
@@ -942,7 +888,7 @@ function renderAddCar() {
           </div>
           <div class="row">
             <button id="save-car-btn" class="btn btn-primary">${f.editing ? "Guardar cambios" : "Añadir vehículo"}</button>
-            <button class="btn" data-view="dashboard">Cancelar</button>
+            <button class="btn" id="cancel-car-btn">Cancelar</button>
           </div>
         </div>
       </div>
@@ -977,7 +923,7 @@ function renderAddLog() {
           ${field("Notas", `<textarea class="textarea" id="log-notes">${esc(f.notes || "")}</textarea>`)}
           <div class="row">
             <button id="save-log-btn" class="btn btn-primary">${f.editing ? "Guardar cambios" : "Guardar registro"}</button>
-            <button class="btn" data-view="history">Cancelar</button>
+            <button class="btn" id="cancel-log-btn">Cancelar</button>
           </div>
         </div>
       </div>
@@ -991,7 +937,17 @@ function renderHistory() {
     if (!query) return true;
     const car = getCarById(l.carId);
     const type = getTypeById(l.type);
-    const haystack = [l.date, l.cost, l.shop, l.notes, l.km, car?.name, car?.plate, type?.label].join(" ").toLowerCase();
+    const haystack = [
+      type?.label || l.type,
+      l.date,
+      l.km,
+      l.cost,
+      l.shop,
+      l.notes,
+      car?.name,
+      car?.year,
+      car?.plate
+    ].join(" ").toLowerCase();
     return haystack.includes(query);
   });
   const total = logs.reduce((sum, l) => {
@@ -1012,7 +968,7 @@ function renderHistory() {
         <option value="all">Todos los tipos</option>
         ${TYPES.map(t => `<option value="${t.id}" ${state.filterType === t.id ? "selected" : ""}>${esc(t.icon)} ${esc(t.label)}</option>`).join("")}
       </select>
-      <input class="input" id="history-query" style="max-width:280px" placeholder="Buscar taller, notas, costo..." value="${esc(state.historyQuery || "")}" />
+      <input class="input" id="history-search" placeholder="Buscar taller, nota, fecha, placa..." value="${esc(state.historyQuery || "")}" style="max-width:320px" />
     </div>
     ${logs.length ? `
       <div class="table">
@@ -1104,18 +1060,21 @@ function bindEvents() {
   $("#export-btn")?.addEventListener("click", exportBackup);
   $("#import-input")?.addEventListener("change", e => importBackup(e.target.files?.[0]));
   document.querySelectorAll("[data-view]").forEach(el => el.addEventListener("click", () => {
-    state.view = el.getAttribute("data-view");
-    if (state.view === "addCar" || state.view === "addLog") state.form = {};
+    const nextView = el.getAttribute("data-view");
+    if (nextView === "addCar") state.form = {};
+    if (nextView === "addLog") state.form = { carId: String(selectedDashboardCar()?.id || "") };
+    state.view = nextView;
     render();
   }));
   document.querySelectorAll("[data-select-car]").forEach(el => el.addEventListener("click", () => {
     state.selectedCar = Number(el.getAttribute("data-select-car"));
     render();
   }));
-  $("#empty-add-car-btn")?.addEventListener("click", startAddCar);
   $("#quick-log-btn")?.addEventListener("click", () => {
     const car = selectedDashboardCar();
-    startAddLog({ carId: String(car?.id || "") });
+    state.form = { carId: String(car?.id || "") };
+    state.view = "addLog";
+    render();
   });
   $("#edit-car-btn")?.addEventListener("click", () => {
     const car = selectedDashboardCar();
@@ -1125,8 +1084,10 @@ function bindEvents() {
     const car = selectedDashboardCar();
     if (car) deleteCar(car.id);
   });
-  $("#save-car-btn")?.addEventListener("click", () => {
+  $("#save-car-btn")?.addEventListener("click", e => {
+    e.currentTarget.disabled = true;
     state.form = {
+      ...state.form,
       name: $("#car-name")?.value || "",
       year: $("#car-year")?.value || "",
       plate: $("#car-plate")?.value || "",
@@ -1135,8 +1096,15 @@ function bindEvents() {
     };
     addCar();
   });
-  $("#save-log-btn")?.addEventListener("click", () => {
+  $("#cancel-car-btn")?.addEventListener("click", () => {
+    state.form = {};
+    state.view = "dashboard";
+    render();
+  });
+  $("#save-log-btn")?.addEventListener("click", e => {
+    e.currentTarget.disabled = true;
     state.form = {
+      ...state.form,
       carId: $("#log-carId")?.value || "",
       type: $("#log-type")?.value || "",
       date: $("#log-date")?.value || "",
@@ -1147,9 +1115,14 @@ function bindEvents() {
     };
     addLog();
   });
+  $("#cancel-log-btn")?.addEventListener("click", () => {
+    state.form = {};
+    state.view = "history";
+    render();
+  });
   $("#filter-car")?.addEventListener("change", e => { state.filterCar = e.target.value; render(); });
   $("#filter-type")?.addEventListener("change", e => { state.filterType = e.target.value; render(); });
-  $("#history-query")?.addEventListener("input", e => { state.historyQuery = e.target.value; render(); });
+  $("#history-search")?.addEventListener("input", e => { state.historyQuery = e.target.value; render(); });
   document.querySelectorAll("[data-edit-log]").forEach(el => el.addEventListener("click", () => {
     editLog(Number(el.getAttribute("data-edit-log")));
   }));

@@ -34,7 +34,8 @@ a { color: inherit; }
 .syncdot { width: 8px; height: 8px; border-radius: 50%; background: #666; }
 .header { position: sticky; top: 0; z-index: 20; background: rgba(13,13,15,.95); backdrop-filter: blur(10px); border-bottom: 1px solid #1e1e22; }
 .header-inner { max-width: 1040px; margin: 0 auto; min-height: 58px; display: flex; align-items: center; gap: 16px; padding: 0 20px; }
-.logo { width: 30px; height: 30px; border-radius: 8px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); display: grid; place-items: center; color: #111; font-weight: 900; }
+.logo { width: 34px; height: 34px; border-radius: 10px; background: #111; border: 1px solid var(--border); display: grid; place-items: center; overflow: hidden; flex: 0 0 auto; }
+.logo img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
 .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; }
 .services { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); gap: 12px; }
@@ -113,49 +114,4 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 0; }
 }
 .btn-install:hover {
   background: #221b0e;
-}
-
-.smart-alert {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 12px 14px;
-  background: var(--panel-2);
-}
-.smart-alert.warn {
-  border-color: #6e4a12;
-  background: #17140c;
-}
-.smart-alert.danger {
-  border-color: #7f2c2c;
-  background: #1b1010;
-}
-.chart-list {
-  display: grid;
-  gap: 10px;
-}
-.chart-row {
-  display: grid;
-  grid-template-columns: 70px minmax(0,1fr) 72px;
-  gap: 10px;
-  align-items: center;
-}
-.chart-label {
-  white-space: nowrap;
-}
-.chart-bar {
-  height: 10px;
-  background: #252528;
-  border-radius: 999px;
-  overflow: hidden;
-}
-.chart-bar > span {
-  display: block;
-  height: 100%;
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  border-radius: 999px;
-}
-@media (max-width: 760px) {
-  .chart-row {
-    grid-template-columns: 58px minmax(0,1fr) 64px;
-  }
 }
