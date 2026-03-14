@@ -31,11 +31,10 @@ const state = {
   selectedCar: null,
   filterCar: "all",
   filterType: "all",
-  filterFuelCar: "all",
+  historyQuery: "",
+  form: {},
   editingCarId: null,
   editingLogId: null,
-  editingFuelId: null,
-  form: {},
   toast: null,
 };
 
@@ -76,7 +75,6 @@ function normalizeData(input) {
   const src = input && typeof input === "object" ? input : {};
   const cars = Array.isArray(src.cars) ? src.cars : [];
   const logs = Array.isArray(src.logs) ? src.logs : [];
-  const fuel = Array.isArray(src.fuel) ? src.fuel : [];
   const safeCars = cars
     .filter(c => c && typeof c === "object")
     .map(c => ({
@@ -102,20 +100,7 @@ function normalizeData(input) {
       notes: typeof l.notes === "string" ? l.notes.slice(0, 500) : ""
     }))
     .filter(l => carIds.has(l.carId) && l.type && l.date);
-  const safeFuel = fuel
-    .filter(f => f && typeof f === "object")
-    .map(f => ({
-      id: Number.isFinite(Number(f.id)) ? Number(f.id) : uid(),
-      carId: typeof f.carId === "string" || typeof f.carId === "number" ? String(f.carId) : "",
-      date: typeof f.date === "string" ? f.date.slice(0, 10) : "",
-      km: Number.isFinite(Number(f.km ?? f.odo ?? f.mi)) ? Math.max(0, parseInt(f.km ?? f.odo ?? f.mi, 10)) : 0,
-      gallons: Number.isFinite(Number(f.gallons)) ? Math.max(0, Number(f.gallons)) : 0,
-      total: Number.isFinite(Number(f.total)) ? Math.max(0, Number(f.total)) : 0,
-      station: typeof f.station === "string" ? f.station.slice(0, 80) : "",
-      notes: typeof f.notes === "string" ? f.notes.slice(0, 300) : ""
-    }))
-    .filter(f => carIds.has(f.carId) && f.date && f.gallons > 0);
-  return { cars: safeCars, logs: safeLogs, fuel: safeFuel };
+  return { cars: safeCars, logs: safeLogs };
 }
 function loadLocal() {
   try {
@@ -267,6 +252,10 @@ function estimateNextService(car) {
   }
   return { ...next, eta };
 }
+function parseMoney(value) {
+  const n = parseFloat(String(value || "").replace(/[^0-9.]/g, ""));
+  return Number.isFinite(n) ? n : 0;
+}
 function getVehicleTotalCost(carId) {
   return state.data.logs
     .filter(l => String(l.carId) === String(carId))
@@ -278,53 +267,6 @@ function getVehicleYearCost(carId) {
     .filter(l => String(l.carId) === String(carId) && String(l.date || "").startsWith(String(year)))
     .reduce((sum, l) => sum + parseMoney(l.cost), 0);
 }
-
-function parseMoney(value) {
-  const cleaned = String(value ?? "").replace(/[^0-9.]/g, "");
-  const n = Number(cleaned);
-  return Number.isFinite(n) ? n : 0;
-}
-function getFuelEntries(carId) {
-  return state.data.fuel
-    .filter(f => String(f.carId) === String(carId))
-    .sort((a, b) => new Date(a.date) - new Date(b.date) || Number(a.km) - Number(b.km));
-}
-function getFuelStats(carId) {
-  const entries = getFuelEntries(carId);
-  const totalGallons = entries.reduce((sum, f) => sum + Number(f.gallons || 0), 0);
-  const totalCost = entries.reduce((sum, f) => sum + Number(f.total || 0), 0);
-  let totalMiles = 0;
-  let mpgSamples = [];
-  let costPerMileSamples = [];
-  for (let i = 1; i < entries.length; i++) {
-    const miles = Number(entries[i].km) - Number(entries[i - 1].km);
-    const gallons = Number(entries[i].gallons || 0);
-    const total = Number(entries[i].total || 0);
-    if (miles > 0) {
-      totalMiles += miles;
-      if (gallons > 0) mpgSamples.push(miles / gallons);
-      if (total > 0) costPerMileSamples.push(total / miles);
-    }
-  }
-  const mpg = mpgSamples.length ? mpgSamples.reduce((a,b)=>a+b,0) / mpgSamples.length : null;
-  const costPerMile = costPerMileSamples.length ? costPerMileSamples.reduce((a,b)=>a+b,0) / costPerMileSamples.length : null;
-  const avgPerGallon = totalGallons > 0 ? totalCost / totalGallons : null;
-  return { entries, totalGallons, totalCost, totalMiles, mpg, costPerMile, avgPerGallon };
-}
-function getFuelChartData(carId) {
-  const entries = getFuelEntries(carId);
-  const buckets = new Map();
-  for (const f of entries) {
-    const key = String(f.date || '').slice(0,7);
-    if (!key) continue;
-    const item = buckets.get(key) || { month: key, cost: 0, gallons: 0 };
-    item.cost += Number(f.total || 0);
-    item.gallons += Number(f.gallons || 0);
-    buckets.set(key, item);
-  }
-  return Array.from(buckets.values()).sort((a,b)=>a.month.localeCompare(b.month)).slice(-6);
-}
-
 function getDateBasedUpcomingServices(car) {
   const now = new Date();
   const serviceRules = [
@@ -556,25 +498,50 @@ async function installPWA() {
 function addCar() {
   const f = state.form;
   if (!f.name || !f.year || !f.plate) return setToast("Completa nombre, año y tablilla.", "error");
+
+  const targetId = state.editingCarId ?? f.id;
+  const existingIndex = state.data.cars.findIndex(c => String(c.id) === String(targetId));
+  const isEditing = existingIndex >= 0;
   const car = {
-    id: uid(),
+    id: isEditing ? state.data.cars[existingIndex].id : uid(),
     name: String(f.name).trim(),
     year: String(f.year).trim(),
     plate: String(f.plate).trim().toUpperCase(),
     km: Number.isFinite(Number(f.km)) ? Math.max(0, parseInt(f.km, 10)) : 0,
     color: String(f.color || "").trim()
   };
-  updateData({ ...state.data, cars: [...state.data.cars, car] });
+
+  const cars = [...state.data.cars];
+  if (isEditing) {
+    cars[existingIndex] = { ...cars[existingIndex], ...car };
+  } else {
+    cars.push(car);
+  }
+
+  updateData({ ...state.data, cars });
   state.form = {};
+  state.editingCarId = null;
   state.view = "dashboard";
   state.selectedCar = car.id;
-  setToast("Vehículo añadido.", "success");
+  setToast(isEditing ? "Vehículo actualizado." : "Vehículo añadido.", "success");
+}
+function editCar(id) {
+  const car = getCarById(id);
+  if (!car) return;
+  state.editingCarId = car.id;
+  state.form = { ...car, editing: true };
+  state.view = "addCar";
+  render();
 }
 function addLog() {
   const f = state.form;
   if (!f.carId || !f.type || !f.date || f.km === undefined || f.km === "") return setToast("Completa vehículo, tipo, fecha y kilometraje.", "error");
+
+  const targetId = state.editingLogId ?? f.id;
+  const existingIndex = state.data.logs.findIndex(l => String(l.id) === String(targetId));
+  const isEditing = existingIndex >= 0;
   const log = {
-    id: uid(),
+    id: isEditing ? state.data.logs[existingIndex].id : uid(),
     carId: String(f.carId),
     type: String(f.type),
     date: String(f.date),
@@ -583,66 +550,42 @@ function addLog() {
     shop: String(f.shop || "").trim(),
     notes: String(f.notes || "").trim()
   };
-  const cars = state.data.cars.map(c => String(c.id) === String(f.carId) ? { ...c, km: Math.max(Number(c.km) || 0, Number(log.km) || 0) } : c);
-  updateData({ cars, logs: [log, ...state.data.logs] });
-  state.form = {};
-  state.view = "history";
-  setToast("Mantenimiento registrado.", "success");
-}
 
-function addFuel() {
-  const f = state.form;
-  if (!f.carId || !f.date || f.km === undefined || f.km === "" || !f.gallons || !f.total) return setToast("Completa vehículo, fecha, millaje, galones y total.", "error");
-  const targetId = state.editingFuelId ?? f.id;
-  const existingIndex = state.data.fuel.findIndex(item => String(item.id) === String(targetId));
-  const isEditing = existingIndex >= 0;
-  const fuel = {
-    id: isEditing ? state.data.fuel[existingIndex].id : uid(),
-    carId: String(f.carId),
-    date: String(f.date),
-    km: Math.max(0, parseInt(f.km, 10)),
-    gallons: Math.max(0, Number(f.gallons)),
-    total: Math.max(0, Number(f.total)),
-    station: String(f.station || "").trim(),
-    notes: String(f.notes || "").trim()
-  };
-  const cars = state.data.cars.map(c => String(c.id) === String(fuel.carId) ? { ...c, km: Math.max(Number(c.km) || 0, Number(fuel.km) || 0) } : c);
-  const rows = [...state.data.fuel];
-  if (isEditing) rows[existingIndex] = { ...rows[existingIndex], ...fuel };
-  else rows.unshift(fuel);
-  updateData({ ...state.data, cars, fuel: rows });
+  const cars = state.data.cars.map(c => String(c.id) === String(log.carId) ? { ...c, km: Math.max(Number(c.km) || 0, Number(log.km) || 0) } : c);
+  const logs = [...state.data.logs];
+  if (isEditing) {
+    logs[existingIndex] = { ...logs[existingIndex], ...log };
+  } else {
+    logs.unshift(log);
+  }
+
+  updateData({ ...state.data, cars, logs });
   state.form = {};
-  state.editingFuelId = null;
-  state.view = 'fuel';
-  state.filterFuelCar = fuel.carId;
-  setToast(isEditing ? 'Carga de gasolina actualizada.' : 'Gasolina registrada.', 'success');
+  state.editingLogId = null;
+  state.view = "history";
+  setToast(isEditing ? "Mantenimiento actualizado." : "Mantenimiento registrado.", "success");
 }
-function editFuel(id) {
-  const row = state.data.fuel.find(f => String(f.id) === String(id));
-  if (!row) return;
-  state.editingFuelId = row.id;
-  state.form = { ...row };
-  state.view = 'fuel';
+function editLog(id) {
+  const log = state.data.logs.find(l => String(l.id) === String(id));
+  if (!log) return;
+  state.editingLogId = log.id;
+  state.form = { ...log, editing: true };
+  state.view = "addLog";
   render();
 }
-function deleteFuel(id) {
-  updateData({ ...state.data, fuel: state.data.fuel.filter(f => String(f.id) !== String(id)) });
-  if (String(state.editingFuelId) === String(id)) { state.editingFuelId = null; state.form = {}; }
-  setToast('Carga eliminada.', 'warn');
-}
-
 function deleteCar(id) {
   if (!confirm("¿Eliminar este vehículo y todos sus registros?")) return;
   updateData({
     cars: state.data.cars.filter(c => c.id !== id),
-    logs: state.data.logs.filter(l => String(l.carId) !== String(id)),
-    fuel: state.data.fuel.filter(f => String(f.carId) !== String(id))
+    logs: state.data.logs.filter(l => String(l.carId) !== String(id))
   });
   if (String(state.selectedCar) === String(id)) state.selectedCar = null;
+  if (String(state.editingCarId) === String(id)) { state.editingCarId = null; state.form = {}; }
   setToast("Vehículo eliminado.", "warn");
 }
 function deleteLog(id) {
   updateData({ ...state.data, logs: state.data.logs.filter(l => l.id !== id) });
+  if (String(state.editingLogId) === String(id)) { state.editingLogId = null; state.form = {}; }
   setToast("Registro eliminado.", "warn");
 }
 function exportBackup() {
@@ -745,15 +688,14 @@ function renderHeader() {
     </div>
     <div class="header">
       <div class="header-inner">
-        <div class="row" style="margin-right:8px;flex-wrap:nowrap">
-          <div class="logo"><img src="./icon-512-custom.png" alt="AutoLog"></div>
+        <div class="row" style="margin-right:8px">
+          <div class="logo"><img src="./icon-192-custom.png" alt="AutoLog" /></div>
           <strong>AutoLog Secure</strong>
         </div>
         <div class="nav">
           ${navBtn("dashboard","Inicio")}
-          ${navBtn("addCar","Vehículo")}
-          ${navBtn("addLog","Mant.")}
-          ${navBtn("fuel","Gasolina")}
+          ${navBtn("addCar","Nuevo")}
+          ${navBtn("addLog","Registrar")}
           ${navBtn("history","Historial")}
         </div>
         <div class="muted small" style="margin-left:auto">${state.data.cars.length} veh.</div>
@@ -845,28 +787,17 @@ function renderBackupsView() {
 function renderCostPanel(car) {
   const total = getVehicleTotalCost(car.id);
   const yearTotal = getVehicleYearCost(car.id);
-  const fuel = getFuelStats(car.id);
   return `
     <div class="dashboard-duo">
       <div class="card stat-card">
-        <div class="stat-label">💲 Mantenimiento acumulado</div>
+        <div class="stat-label">💲 Costo acumulado</div>
         <div class="stat-value">$${numFmt(total, "en-US")}</div>
         <div class="small muted">Total registrado para este vehículo</div>
       </div>
       <div class="card stat-card">
-        <div class="stat-label">📆 Mantenimiento este año</div>
+        <div class="stat-label">📆 Costo este año</div>
         <div class="stat-value">$${numFmt(yearTotal, "en-US")}</div>
         <div class="small muted">Mantenimientos del año actual</div>
-      </div>
-      <div class="card stat-card">
-        <div class="stat-label">⛽ Rendimiento promedio</div>
-        <div class="stat-value">${fuel.mpg ? fuel.mpg.toFixed(1) : "—"}</div>
-        <div class="small muted">MPG calculado con cargas consecutivas</div>
-      </div>
-      <div class="card stat-card">
-        <div class="stat-label">🛣️ Costo por milla</div>
-        <div class="stat-value">${fuel.costPerMile ? "$" + fuel.costPerMile.toFixed(2) : "—"}</div>
-        <div class="small muted">Promedio por milla recorrida entre cargas</div>
       </div>
     </div>
   `;
@@ -895,110 +826,6 @@ function renderDateUpcomingPanel(car) {
     </div>
   `;
 }
-
-function renderFuelMiniChart(car) {
-  const points = getFuelChartData(car.id);
-  if (!points.length) return "";
-  const maxCost = Math.max(...points.map(p => p.cost), 1);
-  return `
-    <div class="card" style="padding:18px;margin-bottom:20px">
-      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:10px">
-        <div style="font-weight:700">⛽ Gasto de gasolina por mes</div>
-        <button class="btn small" data-view="fuel">Ver gasolina</button>
-      </div>
-      <div class="fuel-chart">
-        ${points.map(p => `
-          <div class="fuel-bar-wrap">
-            <div class="fuel-bar" style="height:${Math.max(10, Math.round((p.cost / maxCost) * 140))}px"></div>
-            <div class="small muted">$${p.cost.toFixed(0)}</div>
-            <div class="small muted">${esc(p.month.slice(5))}/${esc(p.month.slice(2,4))}</div>
-          </div>
-        `).join("")}
-      </div>
-    </div>
-  `;
-}
-
-function renderFuelView() {
-  if (!state.data.cars.length) {
-    return `<div class="card empty"><p>Primero debes añadir un vehículo.</p><div style="margin-top:16px"><button class="btn btn-primary" data-view="addCar">${state.editingCarId ? "Actualizar vehículo" : "Añadir vehículo"}</button></div></div>`;
-  }
-  const f = state.form;
-  const fuelRows = state.data.fuel.filter(item => state.filterFuelCar === "all" || String(item.carId) === String(state.filterFuelCar))
-    .sort((a, b) => new Date(b.date) - new Date(a.date) || Number(b.km) - Number(a.km));
-  const selectedCarId = state.filterFuelCar !== "all" ? state.filterFuelCar : (state.selectedCar || state.data.cars[0]?.id || "");
-  const stats = selectedCarId ? getFuelStats(selectedCarId) : null;
-  return `
-    <div class="row" style="justify-content:space-between;margin-bottom:18px">
-      <h2 style="margin:0">Gasolina</h2>
-      <button class="btn btn-primary" id="quick-fuel-btn">Registrar gasolina</button>
-    </div>
-    ${stats ? `
-      <div class="dashboard-duo">
-        <div class="card stat-card"><div class="stat-label">💲 Total gasolina</div><div class="stat-value">$${numFmt(stats.totalCost, "en-US")}</div><div class="small muted">Vehículo seleccionado</div></div>
-        <div class="card stat-card"><div class="stat-label">⛽ Precio promedio</div><div class="stat-value">${stats.avgPerGallon ? "$" + stats.avgPerGallon.toFixed(2) : "—"}</div><div class="small muted">Por galón</div></div>
-        <div class="card stat-card"><div class="stat-label">🛣️ MPG promedio</div><div class="stat-value">${stats.mpg ? stats.mpg.toFixed(1) : "—"}</div><div class="small muted">Calculado automáticamente</div></div>
-        <div class="card stat-card"><div class="stat-label">📏 Costo por milla</div><div class="stat-value">${stats.costPerMile ? "$" + stats.costPerMile.toFixed(2) : "—"}</div><div class="small muted">Basado en cargas seguidas</div></div>
-      </div>
-    ` : ''}
-    <div class="row" style="margin-bottom:18px">
-      <select class="select" id="filter-fuel-car" style="max-width:240px">
-        <option value="all">Todos los vehículos</option>
-        ${state.data.cars.map(c => `<option value="${c.id}" ${String(state.filterFuelCar) === String(c.id) ? "selected" : ""}>${esc(c.name)} ${esc(c.year)}</option>`).join("")}
-      </select>
-    </div>
-    <div class="card" style="padding:24px;margin-bottom:18px">
-      <div class="col">
-        <div class="grid-2">
-          ${field("Vehículo *", `<select class="select" id="fuel-carId">${state.data.cars.map(c => `<option value="${c.id}" ${String(f.carId || state.selectedCar || '') === String(c.id) ? "selected" : ""}>${esc(c.name)} ${esc(c.year)} — ${esc(c.plate)}</option>`).join("")}</select>`)}
-          ${field("Fecha *", `<input class="input" id="fuel-date" type="date" value="${esc(f.date || new Date().toISOString().slice(0,10))}" />`)}
-        </div>
-        <div class="grid-2">
-          ${field("Millaje *", `<input class="input" id="fuel-km" type="number" value="${esc(f.km || '')}" />`)}
-          ${field("Galones *", `<input class="input" id="fuel-gallons" type="number" step="0.01" value="${esc(f.gallons || '')}" />`)}
-        </div>
-        <div class="grid-2">
-          ${field("Total pagado *", `<input class="input" id="fuel-total" type="number" step="0.01" value="${esc(f.total || '')}" />`)}
-          ${field("Gasolinera", `<input class="input" id="fuel-station" value="${esc(f.station || '')}" />`)}
-        </div>
-        ${field("Notas", `<textarea class="textarea" id="fuel-notes">${esc(f.notes || '')}</textarea>`)}
-        <div class="row">
-          <button id="save-fuel-btn" class="btn btn-primary">${state.editingFuelId ? 'Actualizar carga' : 'Guardar carga'}</button>
-          ${state.editingFuelId ? `<button id="cancel-fuel-edit-btn" class="btn">Cancelar edición</button>` : ''}
-        </div>
-      </div>
-    </div>
-    ${fuelRows.length ? `
-      <div class="table">
-        ${fuelRows.map(item => {
-          const car = getCarById(item.carId);
-          const prev = getFuelEntries(item.carId).find(f => new Date(f.date) < new Date(item.date) || (f.date === item.date && Number(f.km) < Number(item.km)));
-          const mpg = prev && Number(item.km) > Number(prev.km) && Number(item.gallons) > 0 ? ((Number(item.km) - Number(prev.km)) / Number(item.gallons)) : null;
-          return `
-            <div class="card entry">
-              <div class="row" style="flex:1;align-items:flex-start">
-                <div style="font-size:24px">⛽</div>
-                <div>
-                  <div class="row">
-                    <strong>${car ? `${esc(car.name)} ${esc(car.year)}` : 'Vehículo'}</strong>
-                    ${car ? `<span class="plate">${esc(car.plate)}</span>` : ''}
-                  </div>
-                  <div class="small muted" style="margin-top:6px">📅 ${fmtDate(item.date)} · 🛣️ ${numFmt(item.km, 'es-ES')} mi · ⛽ ${Number(item.gallons).toFixed(2)} gal · 💲 ${Number(item.total).toFixed(2)}</div>
-                  <div class="small muted" style="margin-top:6px">${item.station ? `🏪 ${esc(item.station)} · ` : ''}Precio/gal: $${(Number(item.total) / Math.max(Number(item.gallons), 0.01)).toFixed(2)}${mpg ? ` · MPG: ${mpg.toFixed(1)}` : ''}</div>
-                  ${item.notes ? `<div class="small muted" style="margin-top:6px">📝 ${esc(item.notes)}</div>` : ''}
-                </div>
-              </div>
-              <div class="row">
-                <button class="btn" data-edit-fuel="${item.id}">Editar</button>
-                <button class="btn btn-danger" data-delete-fuel="${item.id}">Eliminar</button>
-              </div>
-            </div>`;
-        }).join("")}
-      </div>
-    ` : `<div class="card empty">No hay cargas de gasolina aún.</div>`}
-  `;
-}
-
 function renderDashboard() {
   if (!state.data.cars.length) {
     return `
@@ -1024,7 +851,6 @@ function renderDashboard() {
     ${car ? renderUpcomingPanel(car) : ""}
     ${car ? renderDateUpcomingPanel(car) : ""}
     ${car ? renderCostPanel(car) : ""}
-    ${car ? renderFuelMiniChart(car) : ""}
     ${car ? renderReminderPanel(car) : ""}
     ${car ? `
       <div class="card" style="padding:22px;margin-bottom:20px">
@@ -1044,7 +870,6 @@ function renderDashboard() {
         </div>
         <div class="row" style="margin-top:18px">
           <button class="btn btn-primary" id="quick-log-btn">Registrar mantenimiento</button>
-          <button class="btn" id="quick-fuel-btn">Registrar gasolina</button>
           <button class="btn" id="edit-car-btn">Editar vehículo</button>
           <button class="btn btn-danger" id="delete-car-btn">Eliminar vehículo</button>
         </div>
@@ -1059,7 +884,7 @@ function renderAddCar() {
   const f = state.form;
   return `
     <div style="max-width:560px">
-      <h2>${state.editingCarId ? "Editar vehículo" : "Nuevo vehículo"}</h2>
+      <h2>${f.editing ? "Editar vehículo" : "Nuevo vehículo"}</h2>
       <div class="card" style="padding:24px">
         <div class="col">
           ${field("Nombre / Modelo *", `<input class="input" id="car-name" value="${esc(f.name || "")}" />`)}
@@ -1072,8 +897,8 @@ function renderAddCar() {
             ${field("Color", `<input class="input" id="car-color" value="${esc(f.color || "")}" />`)}
           </div>
           <div class="row">
-            <button id="save-car-btn" class="btn btn-primary">Añadir vehículo</button>
-            <button class="btn" data-view="dashboard">Cancelar</button>
+            <button id="save-car-btn" class="btn btn-primary">${f.editing ? "Guardar cambios" : "Añadir vehículo"}</button>
+            <button class="btn" id="cancel-car-btn">Cancelar</button>
           </div>
         </div>
       </div>
@@ -1086,7 +911,7 @@ function renderAddLog() {
   }
   return `
     <div style="max-width:620px">
-      <h2>${state.editingLogId ? "Editar mantenimiento" : "Registrar mantenimiento"}</h2>
+      <h2>${f.editing ? "Editar mantenimiento" : "Registrar mantenimiento"}</h2>
       <div class="card" style="padding:24px">
         <div class="col">
           ${field("Vehículo *", `<select class="select" id="log-carId">
@@ -1107,18 +932,33 @@ function renderAddLog() {
           </div>
           ${field("Notas", `<textarea class="textarea" id="log-notes">${esc(f.notes || "")}</textarea>`)}
           <div class="row">
-            <button id="save-log-btn" class="btn btn-primary">${state.editingLogId ? "Actualizar registro" : "Guardar registro"}</button>
-            <button class="btn" data-view="history">Cancelar</button>
+            <button id="save-log-btn" class="btn btn-primary">${f.editing ? "Guardar cambios" : "Guardar registro"}</button>
+            <button class="btn" id="cancel-log-btn">Cancelar</button>
           </div>
         </div>
       </div>
     </div>`;
 }
 function renderHistory() {
+  const query = String(state.historyQuery || "").trim().toLowerCase();
   const logs = state.data.logs.filter(l => {
     if (state.filterCar !== "all" && String(l.carId) !== String(state.filterCar)) return false;
     if (state.filterType !== "all" && l.type !== state.filterType) return false;
-    return true;
+    if (!query) return true;
+    const car = getCarById(l.carId);
+    const type = getTypeById(l.type);
+    const haystack = [
+      type?.label || l.type,
+      l.date,
+      l.km,
+      l.cost,
+      l.shop,
+      l.notes,
+      car?.name,
+      car?.year,
+      car?.plate
+    ].join(" ").toLowerCase();
+    return haystack.includes(query);
   });
   const total = logs.reduce((sum, l) => {
     const n = parseFloat(String(l.cost || "").replace(/[^0-9.]/g, ""));
@@ -1138,6 +978,7 @@ function renderHistory() {
         <option value="all">Todos los tipos</option>
         ${TYPES.map(t => `<option value="${t.id}" ${state.filterType === t.id ? "selected" : ""}>${esc(t.icon)} ${esc(t.label)}</option>`).join("")}
       </select>
+      <input class="input" id="history-search" placeholder="Buscar taller, nota, fecha, placa..." value="${esc(state.historyQuery || "")}" style="max-width:320px" />
     </div>
     ${logs.length ? `
       <div class="table">
@@ -1183,7 +1024,6 @@ function renderApp() {
   if (state.view === "dashboard") body = renderDashboard();
   if (state.view === "addCar") body = renderAddCar();
   if (state.view === "addLog") body = renderAddLog();
-  if (state.view === "fuel") body = renderFuelView();
   if (state.view === "history") body = renderHistory();
   if (state.view === "backups") body = renderBackupsView();
   return `${renderHeader()}<div class="wrap">${body}</div>`;
@@ -1230,7 +1070,10 @@ function bindEvents() {
   $("#export-btn")?.addEventListener("click", exportBackup);
   $("#import-input")?.addEventListener("change", e => importBackup(e.target.files?.[0]));
   document.querySelectorAll("[data-view]").forEach(el => el.addEventListener("click", () => {
-    state.view = el.getAttribute("data-view");
+    const nextView = el.getAttribute("data-view");
+    if (nextView === "addCar") { state.form = {}; state.editingCarId = null; }
+    if (nextView === "addLog") { state.form = { carId: String(selectedDashboardCar()?.id || "") }; state.editingLogId = null; }
+    state.view = nextView;
     render();
   }));
   document.querySelectorAll("[data-select-car]").forEach(el => el.addEventListener("click", () => {
@@ -1244,13 +1087,6 @@ function bindEvents() {
     state.view = "addLog";
     render();
   });
-  $("#quick-fuel-btn")?.addEventListener("click", () => {
-    const car = selectedDashboardCar();
-    state.editingFuelId = null;
-    state.form = { carId: String(car?.id || ""), date: new Date().toISOString().slice(0,10), km: String(car?.km || "") };
-    state.view = "fuel";
-    render();
-  });
   $("#edit-car-btn")?.addEventListener("click", () => {
     const car = selectedDashboardCar();
     if (car) editCar(car.id);
@@ -1259,9 +1095,10 @@ function bindEvents() {
     const car = selectedDashboardCar();
     if (car) deleteCar(car.id);
   });
-  $("#save-car-btn")?.addEventListener("click", () => {
+  $("#save-car-btn")?.addEventListener("click", e => {
+    e.currentTarget.disabled = true;
     state.form = {
-      id: state.editingCarId || state.form.id,
+      ...state.form,
       name: $("#car-name")?.value || "",
       year: $("#car-year")?.value || "",
       plate: $("#car-plate")?.value || "",
@@ -1270,9 +1107,16 @@ function bindEvents() {
     };
     addCar();
   });
-  $("#save-log-btn")?.addEventListener("click", () => {
+  $("#cancel-car-btn")?.addEventListener("click", () => {
+    state.editingCarId = null;
+    state.form = {};
+    state.view = "dashboard";
+    render();
+  });
+  $("#save-log-btn")?.addEventListener("click", e => {
+    e.currentTarget.disabled = true;
     state.form = {
-      id: state.editingLogId || state.form.id,
+      ...state.form,
       carId: $("#log-carId")?.value || "",
       type: $("#log-type")?.value || "",
       date: $("#log-date")?.value || "",
@@ -1283,34 +1127,20 @@ function bindEvents() {
     };
     addLog();
   });
-  $("#save-fuel-btn")?.addEventListener("click", () => {
-    state.form = {
-      id: state.editingFuelId || state.form.id,
-      carId: $("#fuel-carId")?.value || "",
-      date: $("#fuel-date")?.value || "",
-      km: $("#fuel-km")?.value || "",
-      gallons: $("#fuel-gallons")?.value || "",
-      total: $("#fuel-total")?.value || "",
-      station: $("#fuel-station")?.value || "",
-      notes: $("#fuel-notes")?.value || "",
-    };
-    addFuel();
+  $("#cancel-log-btn")?.addEventListener("click", () => {
+    state.editingLogId = null;
+    state.form = {};
+    state.view = "history";
+    render();
   });
-  $("#cancel-fuel-edit-btn")?.addEventListener("click", () => { state.editingFuelId = null; state.form = {}; render(); });
   $("#filter-car")?.addEventListener("change", e => { state.filterCar = e.target.value; render(); });
   $("#filter-type")?.addEventListener("change", e => { state.filterType = e.target.value; render(); });
-  $("#filter-fuel-car")?.addEventListener("change", e => { state.filterFuelCar = e.target.value; render(); });
+  $("#history-search")?.addEventListener("input", e => { state.historyQuery = e.target.value; render(); });
   document.querySelectorAll("[data-edit-log]").forEach(el => el.addEventListener("click", () => {
     editLog(Number(el.getAttribute("data-edit-log")));
   }));
   document.querySelectorAll("[data-delete-log]").forEach(el => el.addEventListener("click", () => {
     deleteLog(Number(el.getAttribute("data-delete-log")));
-  }));
-  document.querySelectorAll("[data-edit-fuel]").forEach(el => el.addEventListener("click", () => {
-    editFuel(Number(el.getAttribute("data-edit-fuel")));
-  }));
-  document.querySelectorAll("[data-delete-fuel]").forEach(el => el.addEventListener("click", () => {
-    deleteFuel(Number(el.getAttribute("data-delete-fuel")));
   }));
 }
 
