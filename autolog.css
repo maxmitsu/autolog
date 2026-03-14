@@ -114,3 +114,48 @@ hr.sep { border: 0; border-top: 1px solid var(--border); margin: 0; }
 .btn-install:hover {
   background: #221b0e;
 }
+
+.smart-alert {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: var(--panel-2);
+}
+.smart-alert.warn {
+  border-color: #6e4a12;
+  background: #17140c;
+}
+.smart-alert.danger {
+  border-color: #7f2c2c;
+  background: #1b1010;
+}
+.chart-list {
+  display: grid;
+  gap: 10px;
+}
+.chart-row {
+  display: grid;
+  grid-template-columns: 70px minmax(0,1fr) 72px;
+  gap: 10px;
+  align-items: center;
+}
+.chart-label {
+  white-space: nowrap;
+}
+.chart-bar {
+  height: 10px;
+  background: #252528;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.chart-bar > span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  border-radius: 999px;
+}
+@media (max-width: 760px) {
+  .chart-row {
+    grid-template-columns: 58px minmax(0,1fr) 64px;
+  }
+}
